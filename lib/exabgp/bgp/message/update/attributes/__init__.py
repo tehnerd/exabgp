@@ -585,8 +585,10 @@ class Attributes (dict):
 			True : 4,
 		}
 		as_choice = {
-			ASPath.AS_SEQUENCE : as_seq,
-			ASPath.AS_SET      : as_set,
+			ASPath.AS_SEQUENCE        : as_seq,
+			ASPath.AS_SET             : as_set,
+			ASPath.AS_CONFED_SEQUENCE : as_seq,
+			ASPath.AS_CONFED_SET      : as_set,
 		}
 
 		upr = unpacker[asn4]
@@ -598,7 +600,7 @@ class Attributes (dict):
 				stype = ord(data[0])
 				slen  = ord(data[1])
 
-				if stype not in (ASPath.AS_SET, ASPath.AS_SEQUENCE):
+				if stype not in as_choice:
 					raise Notify(3,11,'invalid AS Path type sent %d' % stype)
 
 				end = 2+(slen*length)

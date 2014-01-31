@@ -14,16 +14,20 @@ from exabgp.bgp.message.open.asn import AS_TRANS
 # =================================================================== ASPath (2)
 
 class ASPath (Attribute):
-	AS_SET      = 0x01
-	AS_SEQUENCE = 0x02
+	AS_SET             = 0x01
+	AS_SEQUENCE        = 0x02
+	AS_CONFED_SEQUENCE = 0x03
+	AS_CONFED_SET      = 0x04
 
 	ID = AttributeID.AS_PATH
 	FLAG = Flag.TRANSITIVE
 	MULTIPLE = False
 
-	def __init__ (self,as_sequence,as_set,index=None):
+	def __init__ (self,as_sequence,as_set,as_conf_sequence=[],as_conf_set=[],index=None):
 		self.as_seq = as_sequence
 		self.as_set = as_set
+		self.as_cseq = as_conf_sequence
+		self.as_cset = as_conf_set
 		self.segments = ''
 		self.packed = {True:'',False:''}
 		self.index = index  # the original packed data, use for indexing
@@ -40,8 +44,12 @@ class ASPath (Attribute):
 
 	def _segments (self,asn4):
 		segments = ''
+		if not asn4 and self.as_cseq:
+			segments = self._segment(self.AS_CONFED_SEQUENCE,self.as_cseq,asn4)
 		if self.as_seq:
 			segments = self._segment(self.AS_SEQUENCE,self.as_seq,asn4)
+		if not asn4 and self.as_cset:
+			segments += self._segment(self.AS_CONFED_SET,self.as_cset,asn4)
 		if self.as_set:
 			segments += self._segment(self.AS_SET,self.as_set,asn4)
 		return segments
@@ -59,9 +67,11 @@ class ASPath (Attribute):
 		as2_seq = [_ if not _.asn4() else AS_TRANS for _ in self.as_seq]
 		as2_set = [_ if not _.asn4() else AS_TRANS for _ in self.as_set]
 
-		message = ASPath(as2_seq,as2_set)._pack(False)
 		if AS_TRANS in as2_seq or AS_TRANS in as2_set:
+			message = ASPath(as2_seq,as2_set)._pack(False)
 			message += AS4Path(self.as_seq,self.as_set)._pack()
+		else:
+			message = ASPath(as2_seq,as2_set,self.as_conf_sequence,self.as_conf_set)._pack(False)
 		return message
 
 	def __len__ (self):
