@@ -69,8 +69,8 @@ class Text (object):
 		)
 
 	def _operational_advisory (self,neighbor,operational):
-		return 'neighbor %s operational %s afi %s safi %s advisory "%s"' % (
-			neighbor,operational.name,operational.afi,operational.safi,operational.data
+		return 'neighbor %s operational %s advisory "%s"' % (
+			neighbor,operational.name,operational.data
 		)
 
 	def _operational_query (self,neighbor,operational):
@@ -83,11 +83,6 @@ class Text (object):
 			neighbor,operational.name,operational.afi,operational.safi,operational.routerid,operational.sequence,operational.counter
 		)
 
-	def _operational_interface (self,neighbor,operational):
-		return 'neighbor %s operational %s afi %s safi %s router-id %s sequence %d rxc %d txc %d' % (
-			neighbor,operational.name,operational.afi,operational.safi,operational.routerid,operational.sequence,operational.rxc,operational.txc
-		)
-
 	def operational (self,neighbor,what,operational):
 		if what == 'advisory':
 			return self._operational_advisory(neighbor,operational)
@@ -95,8 +90,6 @@ class Text (object):
 			return self._operational_query(neighbor,operational)
 		elif what == 'counter':
 			return self._operational_counter(neighbor,operational)
-		elif what == 'interface':
-			return self._operational_interface(neighbor,operational)
 		else:
 			raise RuntimeError('the code is broken, we are trying to print a unknown type of operational message')
 
@@ -216,8 +209,8 @@ class JSON (object):
 		return self._header(
 			self._neighbor(
 				neighbor,
-				'"operational": { "name": "%s", "afi": "%s", "safi": "%s", "advisory": "%s"' % (
-					operational.name,operational.afi,operational.safi,operational.data
+				'"operational": { "name": "%s", "advisory": "%s"' % (
+					operational.name,operational.data
 				)
 			)
 		)
@@ -242,16 +235,6 @@ class JSON (object):
 			)
 		)
 
-	def _operational_interface (self,neighbor,operational):
-		return self._header(
-			self._neighbor(
-				neighbor,
-				'"operational": { "name": "%s", "afi": "%s", "safi": "%s", "router-id": "%s", "sequence": %d, "rxc": "%s", "txc": "%s"' % (
-					operational.name,operational.afi,operational.safi,operational.routerid,operational.sequence,operational.rxc,operational.txc
-				)
-			)
-		)
-
 	def operational (self,neighbor,what,operational):
 		if what == 'advisory':
 			return self._operational_advisory(neighbor,operational)
@@ -259,7 +242,5 @@ class JSON (object):
 			return self._operational_query(neighbor,operational)
 		elif what == 'counter':
 			return self._operational_counter(neighbor,operational)
-		elif what == 'interface':
-			return self._operational_interface(neighbor,operational)
 		else:
 			raise RuntimeError('the code is broken, we are trying to print a unknown type of operational message')

@@ -371,16 +371,16 @@ class Configuration (object):
 			return False
 
 		if what == 'asm':
-			if not self._single_operational(Advisory.ASM,scope,['afi','safi','advisory'],tokens[2]):
+			if not self._single_operational(Advisory.ASM,scope,['advisory'],tokens[2]):
 				return False
 		elif what == 'adm':
-			if not self._single_operational(Advisory.ADM,scope,['afi','safi','advisory'],tokens[2]):
+			if not self._single_operational(Advisory.ADM,scope,['advisory'],tokens[2]):
 				return False
 		elif what == 'rpcq':
 			if not self._single_operational(Query.RPCQ,scope,['afi','safi','sequence'],tokens[2]):
 				return False
 		elif what == 'rpcp':
-			if not self._single_operational(Response.RPCP,scope,['afi','safi','sequence','rxc','txc'],tokens[2]):
+			if not self._single_operational(Response.RPCP,scope,['afi','safi','sequence','counter'],tokens[2]):
 				return False
 		elif what == 'apcq':
 			if not self._single_operational(Query.APCQ,scope,['afi','safi','sequence'],tokens[2]):
@@ -2438,7 +2438,7 @@ class Configuration (object):
 
 	def _single_operational_asm (self,scope,value):
 		#return self._single_advisory(Advisory.ASM,scope,value)
-		return self._single_operational(Advisory.ASM,scope,['afi','safi','advisory'],value)
+		return self._single_operational(Advisory.ASM,scope,['advisory'],value)
 
 	def _single_operational (self,klass,scope,parameters,value):
 		def utf8 (string): return string.encode('utf-8')[1:-1]
@@ -2448,8 +2448,6 @@ class Configuration (object):
 			'safi': SAFI.value,
 			'sequence': int,
 			'counter': long,
-			'rxc': long,
-			'txc': long,
 			'advisory': utf8
 		}
 
@@ -2479,13 +2477,13 @@ class Configuration (object):
 			command = tokens.pop(0).lower()
 			value = tokens.pop(0)
 
-			if command == 'router-id':
-				if isipv4(value):
-					data['routerid'] = RouterID(value)
-				else:
-					self._error = 'invalid operational value for %s' % command
-					return False
-				continue
+			# if command == 'router-id':
+			# 	if isipv4(value):
+			# 		data['routerid'] = RouterID(value)
+			# 	else:
+			# 		self._error = 'invalid operational value for %s' % command
+			# 		return False
+			# 	continue
 
 			expected = parameters.pop(0)
 
@@ -2502,14 +2500,16 @@ class Configuration (object):
 			self._error = 'invalid advisory syntax, missing argument(s) %s' % ', '.join(parameters)
 			return False
 
-		if 'routerid' not in data:
-			data['routerid'] = None
-
 		if 'operational' not in scope[-1]:
 			scope[-1]['operational'] = []
 
-		# iterate on each family for the peer if multiprotocol is set.
-		scope[-1]['operational'].append(klass(**data))
+		try:
+			# iterate on each family for the peer if multiprotocol is set.
+			scope[-1]['operational'].append(klass(**data))
+		except TypeError,e:
+			self._error = 'invalid advisory syntax, unknown argument(s) %s' % ', '.join(parameters)
+			return False
+
 		return True
 
 

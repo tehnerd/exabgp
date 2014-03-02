@@ -53,19 +53,40 @@ class OperationalType:
 class Operational (Message):
 	TYPE = chr(0x06)  # next free Message Type, as IANA did not assign one yet.
 	has_family = False
-	has_routerid = False
 	is_fault = False
 
-	def __init__ (self,what):
+	__sequence_number = {}
+	__router_index = {}
+
+	def __init__ (self,what,sequence=None,data=None):
 		Message.__init__(self)
 		self.what = Type(what)
+		self.sequence = sequence
+		self.data = data
+		self.routerid = None
 
-	def _message (self,data):
-		return Message._message(self,"%s%s%s" % (
+	def __sequence (self,routerid):
+		if self.sequence:
+			return pack ('!L',self.sequence)
+
+		packed = routerid.pack()
+		idx = self.__router_index[packed] if packed in self.__router_index else len(self.__router_index)
+		seq = self.sequence if self.sequence else (self.__sequence_number.get(packed,0) + 1) % 0xFFFF
+		self.__sequence_number[packed] = seq
+		return pack('!H',idx) + pack('!H',seq)
+
+	def _message (self,routerid,data):
+		data = self.data if data is None else "%s%s" % (data,self.data)
+
+		return Message._message(self,"%s%s%s%s" % (
 			self.what.pack(),
-			pack('!H',len(data)),
+			pack('!H',len(data)+4),
+			self.__sequence(routerid),
 			data
 		))
+
+	def message (self,negotiated,data=''):
+		return self._message(negotiated.sent_open.router_id,data)
 
 	def __str__ (self):
 		return self.extensive()
@@ -73,51 +94,23 @@ class Operational (Message):
 	def extensive (self):
 		return 'operational %s' % self.name
 
+
 class OperationalFamily (Operational):
 	has_family = True
 
-	def __init__ (self,what,afi,safi,data=''):
-		Operational.__init__(self,what)
+	def __init__ (self,what,afi,safi,sequence=None,data=None):
+		Operational.__init__(self,what,sequence,data)
 		self.afi = AFI(afi)
 		self.safi = SAFI(afi)
-		self.data = data
 
 	def family (self):
 		return (self.afi,self.safi)
 
-	def _message (self,data):
-		return Operational._message(self,"%s%s%s" % (
+	def _message (self,routerid,data=''):
+		return Operational._message(self,routerid,"%s%s%s" % (
 			self.afi.pack(),
 			self.safi.pack(),
 			data
-		))
-
-	def message (self,negotiated):
-		return self._message(self.data)
-
-
-class SequencedOperationalFamily (OperationalFamily):
-	__sequence_number = {}
-	has_routerid = True
-
-	def __init__ (self,what,afi,safi,routerid,sequence,data=''):
-		OperationalFamily.__init__(self,what,afi,safi,data)
-		self.routerid = routerid if routerid else None
-		self.sequence = sequence if sequence else None
-		self._sequence = self.sequence
-		self._routerid = self.routerid
-
-	def message (self,negotiated):
-		self.sent_routerid = self.routerid if self.routerid else negotiated.sent_open.router_id
-		if self.sequence is None:
-			self.sent_sequence = (self.__sequence_number.setdefault(self.routerid,0) + 1) % 0xFFFFFFFF
-			self.__sequence_number[self.sent_routerid] = self.sent_sequence
-		else:
-			self.sent_sequence = self.sequence
-
-		return self._message("%s%s%s" % (
-			self.sent_routerid.pack(),pack('!L',self.sent_sequence),
-			self.data
 		))
 
 
@@ -129,19 +122,19 @@ class NS:
 	BUSY        = 0x05  # Busy
 	NOTFOUND    = 0x06  # Not Found
 
-	class _NS (OperationalFamily):
+	class _NS (Operational):
 		is_fault = True
 
-		def __init__ (self,afi,safi,sequence):
-			OperationalFamily.__init__(
+		def __init__ (self,sequence=None):
+			Operational.__init__(
 				self,
 				OperationalType.NS,
-				afi,safi,
-				'%s%s' % (sequence,self.ERROR_SUBCODE)
+				self.ERROR_SUBCODE,
+				sequence
 			)
 
 		def extensive (self):
-			return 'operational NS %s %s/%s' % (self.name,self.afi,self.safi)
+			return 'operational NS %s' % (self.name)
 
 
 	class Malformed (_NS):
@@ -170,33 +163,39 @@ class NS:
 
 
 class Advisory:
-	class _Advisory (OperationalFamily):
+	class _Advisory (Operational):
 		def extensive (self):
-			return 'operational %s afi %s safi %s "%s"' % (self.name,self.afi,self.safi,self.data)
+			return 'operational %s "%s"' % (self.name,self.data)
+
+		# This is a BIG cheat as everyone speaks IPv4 unicast
+		def family (self):
+			return (AFI(AFI.ipv4),SAFI(SAFI.unicast))
 
 	class ADM (_Advisory):
 		name = 'ADM'
 
-		def __init__ (self,afi,safi,advisory,routerid=None):
+		def __init__ (self,advisory,sequence=None):
 			utf8 = advisory.encode('utf-8')
 			if len(utf8) > MAX_ADVISORY:
 				utf8 = utf8[:MAX_ADVISORY-3] + '...'.encode('utf-8')
-			OperationalFamily.__init__(
-				self,OperationalType.ADM,
-				afi,safi,
+			Operational.__init__(
+				self,
+				OperationalType.ADM,
+				sequence,
 				utf8
 			)
 
 	class ASM (_Advisory):
 		name = 'ASM'
 
-		def __init__ (self,afi,safi,advisory,routerid=None):
+		def __init__ (self,advisory,sequence=None):
 			utf8 = advisory.encode('utf-8')
 			if len(utf8) > MAX_ADVISORY:
 				utf8 = utf8[:MAX_ADVISORY-3] + '...'.encode('utf-8')
-			OperationalFamily.__init__(
-				self,OperationalType.ASM,
-				afi,safi,
+			Operational.__init__(
+				self,
+				OperationalType.ASM,
+				sequence,
 				utf8
 			)
 
@@ -207,23 +206,25 @@ class Advisory:
 
 
 class Query:
-	class _Query (SequencedOperationalFamily):
+	class _Query (OperationalFamily):
 		name = None
 		code = None
 
-		def __init__ (self,afi,safi,routerid,sequence):
-			SequencedOperationalFamily.__init__(
-				self,self.code,
+		def __init__ (self,afi,safi,sequence=None,data=None):
+			OperationalFamily.__init__(
+				self,
+				self.code,
 				afi,safi,
-				routerid,sequence
+				sequence,
+				data
 			)
 
 		def extensive (self):
-			if self._routerid and self._sequence:
-				return 'operational %s afi %s safi %s router-id %s sequence %d' % (
+			if self.sequence:
+				return 'operational %s afi %s safi %s sequence %d' % (
 					self.name,
 					self.afi,self.safi,
-					self._routerid,self._sequence,
+					self.sequence
 				)
 			return 'operational %s afi %s safi %s' % (self.name,self.afi,self.safi)
 
@@ -240,47 +241,30 @@ class Query:
 		code = OperationalType.LPCQ
 
 class Response:
-	class RPCP (SequencedOperationalFamily):
-		name = 'RPCP'
-		code = OperationalType.RPCP
-
-		def __init__ (self,afi,safi,routerid,sequence,rxc,txc):
-			self.rxc = rxc
-			self.txc = txc
-			SequencedOperationalFamily.__init__(
-				self,self.code,
-				afi,safi,
-				routerid,sequence,
-				'%s%s' % (pack('!L',rxc),pack('!L',txc))
-			)
-
-		def extensive (self):
-			return 'operational %s afi %s safi %s router-id %s sequence %d rxc %d txc %d' % (
-				self.name,
-				self.afi,self.safi,
-				self.routerid,self.sequence,
-				self.rxc,self.txc
-			)
-
-	class _Counter (SequencedOperationalFamily):
-		def __init__ (self,afi,safi,routerid,sequence,counter):
+	class _Counter (OperationalFamily):
+		def __init__ (self,afi,safi,sequence,counter):
 			self.counter = counter
-			SequencedOperationalFamily.__init__(
-				self,self.code,
+			OperationalFamily.__init__(
+				self,
+				self.code,
 				afi,safi,
-				routerid,sequence,
+				sequence,
 				pack('!L',counter)
 			)
 
 		def extensive (self):
-			if self._routerid and self._sequence:
-				return 'operational %s afi %s safi %s router-id %s sequence %d counter %d' % (
+			if self.sequence:
+				return 'operational %s afi %s safi %s sequence %d counter %d' % (
 					self.name,
 					self.afi,self.safi,
-					self._routerid,self._sequence,
+					self.sequence,
 					self.counter
 				)
 			return 'operational %s afi %s safi %s counter %d' % (self.name,self.afi,self.safi,self.counter)
+
+	class RPCP (_Counter):
+		name = 'RPCP'
+		code = OperationalType.RPCP
 
 	class APCP (_Counter):
 		name = 'RPCP'
@@ -303,7 +287,7 @@ OperationalGroup = {
 	OperationalType.ASM: ('advisory', Advisory.ASM),
 
 	OperationalType.RPCQ: ('query', Query.RPCQ),
-	OperationalType.RPCP: ('interface', Response.RPCP),
+	OperationalType.RPCP: ('counter', Response.RPCP),
 
 	OperationalType.APCQ: ('query', Query.APCQ),
 	OperationalType.APCP: ('counter', Response.APCP),
@@ -315,34 +299,21 @@ OperationalGroup = {
 def OperationalFactory (data):
 	what = Type(unpack('!H',data[0:2])[0])
 	length = unpack('!H',data[2:4])[0]
+	sequence = unpack('!L',data[4:8])[0]
 
 	decode,klass = OperationalGroup.get(what,('unknown',None))
 
 	if decode == 'advisory':
-		afi = unpack('!H',data[4:6])[0]
-		safi = ord(data[6])
-		data = data[7:length+4]
-		return klass(afi,safi,data)
+		data = data[8:length+4]
+		return klass(data)
 	elif decode == 'query':
-		afi = unpack('!H',data[4:6])[0]
-		safi = ord(data[6])
-		routerid = RouterID('.'.join(str(ord(_)) for _ in data[7:11]))
-		sequence = unpack('!L',data[11:15])[0]
-		return klass(afi,safi,routerid,sequence)
+		afi = unpack('!H',data[8:10])[0]
+		safi = ord(data[10])
+		return klass(afi,safi,sequence)
 	elif decode == 'counter':
-		afi = unpack('!H',data[4:6])[0]
-		safi = ord(data[6])
-		routerid = RouterID('.'.join(str(ord(_)) for _ in data[7:11]))
-		sequence = unpack('!L',data[11:15])[0]
-		counter = unpack('!L',data[15:19])[0]
-		return klass(afi,safi,routerid,sequence,counter)
-	elif decode == 'interface':
-		afi = unpack('!H',data[4:6])[0]
-		safi = ord(data[6])
-		routerid = RouterID('.'.join(str(ord(_)) for _ in data[7:11]))
-		sequence = unpack('!L',data[11:15])[0]
-		rxc = unpack('!L',data[15:19])[0]
-		txc = unpack('!L',data[19:23])[0]
-		return klass(afi,safi,routerid,sequence,rxc,txc)
+		afi = unpack('!H',data[8:10])[0]
+		safi = ord(data[10])
+		counter = unpack('!L',data[11:15])[0]
+		return klass(afi,safi,counter,sequence)
 	else:
 		print 'ignoring ATM this kind of message'
